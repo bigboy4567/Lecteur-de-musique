@@ -13,16 +13,17 @@ import shutil
 import numpy as np
 from animated_list_widget import AnimatedListWidget
 from animated_list_widget_item import AnimatedListWidgetItem
+from music_manager import MusicManager
 
 class MusicPlayer(QtWidgets.QMainWindow):
     update_music_list_signal = QtCore.pyqtSignal()
-    
+
     def __init__(self):
         super().__init__()
-        
+
         # Charger les paramètres
         self.settings = load_settings()
-        
+        self.music_manager = MusicManager(self)  # Initialiser MusicManager avec une référence à MusicPlayer
         # Charger la taille du chunk depuis les paramètres et s'assurer qu'il s'agit bien d'un entier
         self.chunk_size = int(self.settings.get('chunk_size', 16384))
         self.paused_position = 0  # Position sauvegardée lors de la mise en pause
@@ -34,10 +35,13 @@ class MusicPlayer(QtWidgets.QMainWindow):
         else:
             print("Taille du chunk chargée correctement :", self.chunk_size)
 
-        self.setWindowTitle("Acoustiq")
+        self.setWindowTitle("AcoustiqAV")
         self.setGeometry(100, 100, 1000, 800)
         self.setAcceptDrops(True)
         self.executor = None
+
+        self.scroll_timer = QtCore.QTimer(self)
+        self.scroll_timer.timeout.connect(self.scroll_text)
 
         # Initialisation du dossier des icônes
         self.icon_folder = os.path.join(os.path.dirname(__file__), "ICON")
@@ -119,7 +123,7 @@ class MusicPlayer(QtWidgets.QMainWindow):
         # Ajouter un timer pour vérifier la fin de la musique
         self.end_check_timer = QtCore.QTimer(self)
         self.end_check_timer.setInterval(100)  # Vérifier toutes les 100ms
-        self.end_check_timer.timeout.connect(self.check_music_end)
+        self.end_check_timer.timeout.connect(self.music_manager.check_music_end)
         self.end_check_timer.start()
         
         # Initialiser l'interface utilisateur
@@ -129,8 +133,8 @@ class MusicPlayer(QtWidgets.QMainWindow):
         self.set_chunk_size(self.chunk_size)
         
         # Mettre à jour la liste de musique et le compteur dès le chargement
-        self.update_music_list()  # Actualiser la liste avec les données chargées
-        self.update_music_counter()  # Mettre à jour le compteur avec le nombre de musiques
+        self.music_manager.update_music_list()  # Actualiser la liste avec les données chargées
+        self.music_manager.update_music_counter()  # Mettre à jour le compteur avec le nombre de musiques
 
         # Initialise le volume avec une valeur par défaut.
         self.current_volume = round(mixer.music.get_volume() * 100)  # Stocke le volume actuel en pourcentage
@@ -168,36 +172,9 @@ class MusicPlayer(QtWidgets.QMainWindow):
         # Mettre à jour la taille du chunk dans le spectre audio
         self.spectrum.update_chunk_size(self.chunk_size)
 
-    def refresh_music_folder(self):
-        """Recherche et ajoute de nouvelles musiques dans le dossier Stockage_Musique ( !!! NE PAS SUPPRIMER !!!)."""
-        # Charger les musiques actuelles depuis le dossier
-        new_music_data = load_music_files_from_storage()
-        
-        # Compter le nombre total de musiques dans le dossier
-        total_tracks_found = len(new_music_data)
-        
-        # Ajouter uniquement les nouvelles musiques qui ne sont pas déjà dans la liste
-        existing_files = {music['name'] for music in self.music_data}
-        added_tracks = 0
-        for track in new_music_data:
-            if track['name'] not in existing_files:
-                self.music_data.append(track)
-                added_tracks += 1
-        
-        # Mise à jour de la liste et affichage d'un message
-        self.update_music_list()
-        self.update_music_counter()
-        
-        # Afficher un message avec le nombre total et le nombre de nouvelles musiques ajoutées
-        QMessageBox.information(
-            self,
-            "Actualisation",
-            f"{total_tracks_found} musiques trouvées dans le dossier.\n{added_tracks} nouvelles musiques ajoutées à la bibliothèque."
-        )
-
     def show_about_dialog(self):
         about_text = (
-            "<h2>Acoustiq</h2>"
+            "<h2>AcoustiqAV</h2>"
             "<p><strong>Développé par :</strong> Nicolas Q.</p>"
             "<p><strong>Version :</strong> 1.1.0 - Dernière mise à jour : novembre 2024</p>"
             "<p><strong>Licence :</strong> MIT</p>"
@@ -260,27 +237,6 @@ class MusicPlayer(QtWidgets.QMainWindow):
         if self.executor is None:
             self.executor = ThreadPoolExecutor(max_workers=2)
 
-    def add_music_files(self):
-        """Ouvre une boîte de dialogue pour ajouter manuellement des fichiers de musique .wav et les ajoute à la liste."""
-        # Ouvre une boîte de dialogue pour sélectionner des fichiers .wav
-        files, _ = QFileDialog.getOpenFileNames(self, "Sélectionner des fichiers de musique", "", "Fichiers WAV (*.wav)")
- 
-        if files:  # Si des fichiers sont sélectionnés
-            # Chemin du dossier de stockage
-            storage_path = os.path.join(os.path.expanduser("~"), "Music", "Stockage_Musique ( !!! NE PAS SUPPRIMER !!!)")
- 
-            # Vérifie si le dossier existe, sinon le crée
-            if not os.path.exists(storage_path):
-                os.makedirs(storage_path)
- 
-            # Copie les fichiers vers le dossier de stockage et les ajoute à la liste
-            for file_path in files:
-                destination_path = os.path.join(storage_path, os.path.basename(file_path))
-                if not os.path.exists(destination_path):
-                    shutil.copy(file_path, destination_path)
-                self.init_executor()  # Initialiser l'exécuteur si nécessaire
-                self.executor.submit(self.add_files_async, [destination_path])  # Ajoute le fichier dans la liste
- 
     def init_ui(self):
         # Configuration de la fenêtre principale
         self.central_widget = QtWidgets.QWidget(self)
@@ -301,7 +257,7 @@ class MusicPlayer(QtWidgets.QMainWindow):
 
         # Actualiser la bibliothèque
         refresh_action = QAction("Actualiser la bibliothèque", self)
-        refresh_action.triggered.connect(self.refresh_music_folder)
+        refresh_action.triggered.connect(self.music_manager.refresh_music_folder)
         settings_menu.addAction(refresh_action)
 
         # Menu Visualisation
@@ -353,10 +309,10 @@ class MusicPlayer(QtWidgets.QMainWindow):
         self.shortcut_play_pause.activated.connect(self.toggle_play_pause)
 
         self.shortcut_next = QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Right"), self)
-        self.shortcut_next.activated.connect(self.play_next_music)
+        self.shortcut_next.activated.connect(self.music_manager.play_next_music)
 
         self.shortcut_previous = QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Left"), self)
-        self.shortcut_previous.activated.connect(self.play_previous_music)
+        self.shortcut_previous.activated.connect(self.music_manager.play_previous_music)
 
         self.shortcut_volume_up = QtGui.QShortcut(QtGui.QKeySequence("Up"), self)
         self.shortcut_volume_up.activated.connect(self.increase_volume)
@@ -367,7 +323,7 @@ class MusicPlayer(QtWidgets.QMainWindow):
         # Initialisation de la liste de pistes avec un style animé
         self.tracklist = AnimatedListWidget(self)
         self.tracklist.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
-        self.tracklist.itemDoubleClicked.connect(self.play_music)
+        self.tracklist.itemDoubleClicked.connect(self.music_manager.play_music)
 
         # Créer la barre de progression
         self.progress = QSlider(QtCore.Qt.Orientation.Horizontal)
@@ -432,7 +388,7 @@ class MusicPlayer(QtWidgets.QMainWindow):
                 background-color: #FFFFFF;
             }
         """)
-        self.search_var.textChanged.connect(self.update_music_list)
+        self.search_var.textChanged.connect(self.music_manager.update_music_list)
 
         # Compteur de pistes
         self.track_counter = QtWidgets.QLabel("Total de musiques : 0")
@@ -558,19 +514,19 @@ class MusicPlayer(QtWidgets.QMainWindow):
         # Application du style aux différents boutons de contrôle
         self.select_all_button = QtWidgets.QPushButton("Tout sélectionner")
         self.select_all_button.setStyleSheet(button_style)
-        self.select_all_button.clicked.connect(self.select_all_tracks)
+        self.select_all_button.clicked.connect(self.music_manager.select_all_tracks)
 
         self.add_music_button = QtWidgets.QPushButton("Ajouter des musiques")
         self.add_music_button.setStyleSheet(button_style)
-        self.add_music_button.clicked.connect(self.add_music_files)
+        self.add_music_button.clicked.connect(self.music_manager.add_music_files)
 
         self.delete_button = QtWidgets.QPushButton("Supprimer")
         self.delete_button.setStyleSheet(delete_button_style)
-        self.delete_button.clicked.connect(self.delete_selected_music)
+        self.delete_button.clicked.connect(self.music_manager.delete_selected_music)
 
         self.restore_button = QtWidgets.QPushButton("Restaurer")
         self.restore_button.setStyleSheet(button_style)
-        self.restore_button.clicked.connect(self.restore_music)
+        self.restore_button.clicked.connect(self.music_manager.restore_music)
         self.restore_button.setEnabled(False)
 
         self.play_button = QtWidgets.QPushButton()
@@ -583,13 +539,13 @@ class MusicPlayer(QtWidgets.QMainWindow):
         self.forward_button.setIcon(QtGui.QIcon(os.path.join(self.icon_folder, "forward_icon.png")))
         self.forward_button.setIconSize(QtCore.QSize(30, 30))
         self.forward_button.setStyleSheet(control_button_style)
-        self.forward_button.clicked.connect(self.play_next_music)
+        self.forward_button.clicked.connect(self.music_manager.play_next_music)
 
         self.backward_button = QtWidgets.QPushButton()
         self.backward_button.setIcon(QtGui.QIcon(os.path.join(self.icon_folder, "backward_icon.png")))
         self.backward_button.setIconSize(QtCore.QSize(30, 30))
         self.backward_button.setStyleSheet(control_button_style)
-        self.backward_button.clicked.connect(self.play_previous_music)
+        self.backward_button.clicked.connect(self.music_manager.play_previous_music)
         
         # Bouton de répétition
         repeat_button_style = button_style.replace("#4CAF50", "#FF9800").replace("#45A049", "#FB8C00")
@@ -631,7 +587,7 @@ class MusicPlayer(QtWidgets.QMainWindow):
         control_layout.addWidget(self.repeat_button)
 
         layout.addLayout(control_layout)
-        self.update_music_list_signal.connect(self.update_music_list)
+        self.update_music_list_signal.connect(self.music_manager.update_music_list)
     
     def increase_volume(self):
         """Augmente le volume par incréments fixes de 5 % et affiche une notification."""
@@ -650,7 +606,7 @@ class MusicPlayer(QtWidgets.QMainWindow):
         mixer.music.set_volume(self.current_volume / 100.0)
         # Affiche la notification
         self.spectrum.show_volume_notification(f"Volume : {self.current_volume}%")
-
+        
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
@@ -681,6 +637,31 @@ class MusicPlayer(QtWidgets.QMainWindow):
             self.settings['background_color'] = color.name()
             save_settings(self.settings)  # Utiliser la fonction importée pour sauvegarder les paramètres
 
+    def update_scroll(self):
+        """Démarre le défilement si le texte est trop long pour le label."""
+        self.scroll_text_full = self.current_track_label.text()
+        font_metrics = self.current_track_label.fontMetrics()
+        text_width = font_metrics.horizontalAdvance(self.scroll_text_full)
+        if text_width > self.current_track_label.width() - 20:  # Vérifie si le texte dépasse
+            self.scroll_text_full += "     "  # Ajoute de l'espace pour une transition fluide
+            if not self.scroll_timer.isActive():
+                self.scroll_position = 0
+                self.scroll_timer.start(50)  # Intervalle de défilement
+        else:
+            self.scroll_timer.stop()
+            self.scroll_position = 0
+            self.current_track_label.setText(self.scroll_text_full)
+
+    def scroll_text(self):
+        """Défile le texte de droite à gauche."""
+        visible_text_length = self.current_track_label.width() // 10  # Estimation des caractères visibles
+        display_text = (self.scroll_text_full + "     ") * 2  # Double le texte pour un défilement en continu
+        if self.scroll_position < len(self.scroll_text_full):
+            self.scroll_position += 1
+        else:
+            self.scroll_position = 0  # Réinitialiser la position pour un défilement fluide
+        self.current_track_label.setText(display_text[self.scroll_position:self.scroll_position + visible_text_length])
+
     def toggle_always_on_top(self):
         """Active ou désactive l'option 'Toujours au premier plan'."""
         always_on_top = self.always_on_top_action.isChecked()
@@ -704,47 +685,6 @@ class MusicPlayer(QtWidgets.QMainWindow):
             self.settings['spectrum_color'] = color.name()
             save_settings(self.settings)  # Utiliser la fonction importée pour sauvegarder les paramètres
 
-    def select_all_tracks(self):
-        """Sélectionne tous les morceaux de la liste, même si le mode de sélection est unique."""
-        # Passer en mode sélection multiple temporairement
-        self.tracklist.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.MultiSelection)
-        for i in range(self.tracklist.count()):
-            item = self.tracklist.item(i)
-            item.setSelected(True)
-    
-        # Rétablir le mode de sélection unique
-        self.tracklist.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
-
-    def delete_selected_music(self):
-        """Supprime les morceaux sélectionnés."""
-        selected_items = self.tracklist.selectedItems()
-        if not selected_items:
-            QMessageBox.information(self, "Suppression", "Aucun morceau sélectionné pour suppression.")
-            return
-        confirm = QMessageBox.question(
-            self,
-            "Supprimer",
-            f"Voulez-vous supprimer les {len(selected_items)} morceaux sélectionnés ?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
-        )
-        if confirm == QMessageBox.StandardButton.Yes:
-            for item in selected_items:
-                # Trouver l'élément `music_item` par son nom de fichier (`name`)
-                music_item = next(
-                    (m for m in self.music_data if m['name'] == next(
-                        (f['name'] for f in self.filtered_music_data if f['display_name'] == item.text()), None)
-                    ), None
-                )
-                if music_item:
-                    # Supprimer l'élément trouvé
-                    self.deleted_music_backup.insert(0, music_item)
-                    self.music_data.remove(music_item)
-
-            # Mettre à jour l'affichage sans sauvegarde
-            self.update_music_list()
-            self.restore_button.setEnabled(bool(self.deleted_music_backup))
-            self.update_music_counter()
-
     def apply_repeat_mode(self):
         """Applique immédiatement le mode de répétition sélectionné."""
         if self.repeat_mode == "track":
@@ -760,36 +700,6 @@ class MusicPlayer(QtWidgets.QMainWindow):
         # Redémarrer les timers ou ajuster les comportements si nécessaire
         if not self.playing:
             print("La lecture n'est pas en cours. Les modifications seront appliquées lors de la prochaine lecture.")
-
-    def delete_music(self):
-        """Supprime la piste sélectionnée de la liste."""
-        current_row = self.tracklist.currentRow()
-        if current_row >= 0:
-            confirm = QMessageBox.question(
-                self,
-                "Supprimer",
-                "Voulez-vous supprimer la piste sélectionnée ?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
-            )
-            if confirm == QMessageBox.StandardButton.Yes:
-                # Obtenir l'index réel dans self.music_data
-                music_item = self.filtered_music_data[current_row]
-                index_in_music_data = self.music_data.index(music_item)
-                self.deleted_music_backup.insert(0, self.music_data[index_in_music_data])
-                if len(self.deleted_music_backup) > 40:  # Limite le nombre de pistes sauvegardées
-                    self.deleted_music_backup.pop()
-                del self.music_data[index_in_music_data]
-                self.update_music_list()
-                self.restore_button.setEnabled(True)
-                self.update_music_counter()
-
-    def restore_music(self):
-        """Restaure la dernière piste supprimée."""
-        if self.deleted_music_backup:
-            self.music_data.append(self.deleted_music_backup.pop(0))
-            self.update_music_list()
-            self.update_music_counter()
-            self.restore_button.setEnabled(bool(self.deleted_music_backup))
 
     def load_folders(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Sélectionner des fichiers de musique", "", "Fichiers WAV (*.wav)")
@@ -1042,81 +952,6 @@ class MusicPlayer(QtWidgets.QMainWindow):
             dialog.accept()
             QMessageBox.information(self, "Statistiques réinitialisées", "Toutes les statistiques ont été réinitialisées.")
 
-    def play_music(self):
-        try:
-            # Vérifiez si une piste est sélectionnée dans la liste
-            if 0 <= self.tracklist.currentRow() < len(self.filtered_music_data):
-                # Ajouter l'indice actuel à l'historique si ce n'est pas déjà fait
-                if self.current_track_index != -1 and (not self.played_tracks_history or self.played_tracks_history[-1] != self.current_track_index):
-                    self.played_tracks_history.append(self.current_track_index)
-                
-                # Arrêter le suivi du temps pour l'ancien morceau, s'il existe
-                if self.playing:
-                    self.stop_tracking_time()
-
-                # Mettre à jour l'index de la piste actuelle
-                self.current_track_index = self.tracklist.currentRow()
-                
-                # Récupération des informations sur la piste
-                selected_track = self.filtered_music_data[self.current_track_index]
-                track_name = selected_track.get("name")
-                display_name = selected_track.get("display_name", "Inconnu")  # Utiliser "Inconnu" comme valeur par défaut
-                
-                # Vérification de l'existence et de la validité du fichier
-                if not track_name or not os.path.exists(track_name):
-                    QMessageBox.warning(self, "Erreur", f"Le fichier {track_name} est introuvable ou invalide.")
-                    return
-                
-                try:
-                    # Calculer la durée totale de la piste
-                    with wave.open(track_name, 'rb') as wav_file:
-                        frame_rate = wav_file.getframerate()
-                        num_frames = wav_file.getnframes()
-                        self.song_length = num_frames / frame_rate
-                except wave.Error:
-                    QMessageBox.warning(self, "Erreur", "Le fichier sélectionné n'est pas un fichier audio valide.")
-                    return
-                
-                # Charger et lire le fichier audio
-                mixer.music.load(track_name)
-                if self.paused and self.paused_position > 0:
-                    # Reprendre depuis la position sauvegardée
-                    mixer.music.play(start=self.paused_position)
-                    print(f"Reprise à partir de la position : {self.paused_position:.2f} secondes.")
-                else:
-                    # Lecture depuis le début
-                    mixer.music.play()
-                    self.paused_position = 0  # Réinitialiser la position si une nouvelle lecture commence
-
-                self.spectrum.load_audio_file(track_name)
-
-                # Initialisation de l'état de lecture
-                self.start_time = QtCore.QElapsedTimer()
-                self.start_time.start()
-                self.progress_timer.start()
-                self.update_play_stats(display_name)
-                self.current_track_label.setText(display_name)
-                self.play_button.setIcon(QtGui.QIcon(os.path.join(self.icon_folder, "pause_icon.png")))
-                self.playing = True
-                self.paused = False
-                self.spectrum.set_paused(False)
-                
-                # Mettre à jour le temps total pour l'affichage dès que la piste change
-                self.update_time_label(0)  # Met à jour le label de temps à 0
-                
-                # Démarrer le suivi du temps d'écoute
-                self.start_tracking_time(display_name)
-
-                print(f"Lecture de {display_name} ({self.song_length:.2f} secondes).")
-            else:
-                print("Aucune piste sélectionnée ou liste vide.")
-        except Exception as e:
-            print(f"Erreur lors de la lecture du fichier : {e}")
-            self.playing = False
-            self.paused = False
-            self.play_button.setIcon(QtGui.QIcon(os.path.join(self.icon_folder, "play_icon.png")))
-            self.progress_timer.stop()
-
     def format_total_time(self, total_seconds):
         """Formate le temps total en jours, heures, minutes et secondes."""
         days = int(total_seconds // 86400)
@@ -1152,143 +987,11 @@ class MusicPlayer(QtWidgets.QMainWindow):
         if self.playing and not self.paused and self.song_length:
             elapsed_time = self.paused_position + self.start_time.elapsed() / 1000.0  # Temps écoulé en secondes
             if elapsed_time >= self.song_length:
-                self.handle_track_end()
+                self.music_manager.handle_track_end()
             else:
                 progress_percentage = (elapsed_time / self.song_length) * 1000
                 self.progress.setValue(int(progress_percentage))
                 self.update_time_label(elapsed_time)  # Met à jour le label avec le temps écoulé
-
-    def handle_track_end(self):
-        """Gère la fin de la piste en fonction du mode de répétition."""
-        # Arrête le suivi du temps pour la piste terminée
-        self.stop_tracking_time()
-
-        if self.repeat_mode == "track":
-            # Rejoue la même piste
-            if 0 <= self.current_track_index < len(self.filtered_music_data):
-                self.tracklist.setCurrentRow(self.current_track_index)  # Assure que la bonne piste est sélectionnée
-                self.play_music()  # Relance la musique actuelle
-            else:
-                print("Aucune piste sélectionnée ou liste vide.")
-        elif self.repeat_mode == "playlist":
-            # Passe à la piste suivante ou revient au début si nécessaire
-            self.play_next_music()
-        else:
-            # Mode normal : arrête si c'est la dernière piste
-            if self.current_track_index < len(self.filtered_music_data) - 1:
-                self.play_next_music()
-            else:
-                # Fin de la lecture
-                self.play_button.setIcon(QtGui.QIcon(os.path.join(self.icon_folder, "play_icon.png")))
-                self.playing = False
-                self.progress.setValue(0)
-                self.progress_timer.stop()
-                print("Lecture terminée.")
-
-    def start_tracking_time(self, track_name):
-        """Démarre ou reprend le suivi du temps d'écoute pour une piste."""
-        # Vérifiez si current_track_name existe et si le morceau change
-        if getattr(self, 'current_track_name', None) != track_name:
-            # Si une nouvelle piste est jouée, réinitialiser le temps cumulé
-            self.track_cumulative_time = 0
-
-        # Assigner le nom du morceau actuel
-        self.current_track_name = track_name
-        
-        # Initialiser et démarrer le timer
-        self.track_play_start_time = QtCore.QElapsedTimer()
-        self.track_play_start_time.start()
-
-        print(f"Suivi du temps démarré pour la piste : {track_name}")
-
-    def stop_tracking_time(self):
-        """Arrête le suivi du temps d'écoute et met à jour les statistiques."""
-        if not self.track_play_start_time or not self.current_track_name:
-            return  # Assurez-vous que tout est initialisé correctement
-
-        # Calculer le temps depuis le dernier démarrage
-        elapsed_time = self.track_play_start_time.elapsed() / 1000.0  # Temps écoulé en secondes
-        
-        # Empêcher les temps négatifs ou anormaux
-        if elapsed_time <= 0 or elapsed_time > self.song_length * 2:  # Par sécurité, limite à 2 fois la durée du morceau
-            print(f"Temps anormal détecté : {elapsed_time}s. Ignoré.")
-            return
-        
-        # Charger les statistiques actuelles
-        stats = load_stats()
-
-        # Ajouter la piste aux statistiques si elle n'existe pas encore
-        if self.current_track_name not in stats:
-            stats[self.current_track_name] = {"plays": 0, "total_time": 0}
-
-        # Ajouter le temps d'écoute uniquement si la piste est en cours de lecture
-        stats[self.current_track_name]["total_time"] += elapsed_time
-        stats[self.current_track_name]["plays"] += 1
-
-        # Sauvegarder les statistiques
-        save_stats(stats)
-
-        # Réinitialiser le suivi
-        self.track_play_start_time = None
-        self.current_track_name = None
-
-        print(f"Temps d'écoute ajouté : {elapsed_time:.2f}s pour {self.current_track_name}")
-
-    def check_music_end(self):
-        """Vérifie si la musique est terminée et gère la fin de la piste."""
-        if self.playing and not self.paused and not mixer.music.get_busy():
-            self.handle_track_end()
-
-    def play_next_music(self):
-        """Passe à la musique suivante."""
-        if not self.filtered_music_data:
-            return
-
-        # Si la lecture est active, arrêtez le suivi du temps pour la piste actuelle
-        if self.playing:
-            self.stop_tracking_time()
-
-        # Passez à l'index suivant ou au début si en mode répétition de playlist
-        if self.shuffle_mode:
-            self.current_track_index = random.randint(0, len(self.filtered_music_data) - 1)
-        else:
-            self.current_track_index += 1
-            if self.current_track_index >= len(self.filtered_music_data):
-                if self.repeat_mode == "playlist":
-                    self.current_track_index = 0
-                else:
-                    self.current_track_index = len(self.filtered_music_data) - 1
-                    self.stop_music()
-                    return
-
-        # Sélectionnez la piste dans la liste et jouez-la
-        self.tracklist.setCurrentRow(self.current_track_index)
-        self.play_music()
-
-    def stop_music(self):
-        """Arrête la musique et met à jour les statistiques."""
-        if self.playing:
-            self.stop_tracking_time()
-
-        # Arrêter la musique
-        mixer.music.stop()
-        self.playing = False
-        self.paused = False
-        self.progress_timer.stop()
-        self.play_button.setIcon(QtGui.QIcon(os.path.join(self.icon_folder, "play_icon.png")))
-
-    def play_previous_music(self):
-        """Passe à la musique précédente."""
-        if self.played_tracks_history:
-            self.current_track_index = self.played_tracks_history.pop()
-        else:
-            self.current_track_index -= 1
-            if self.current_track_index < 0:
-                self.current_track_index = 0
-                return
-
-        self.tracklist.setCurrentRow(self.current_track_index)
-        self.play_music()
 
     def toggle_repeat(self):
         print("toggle_repeat appelé")  # Vérifie si le bouton est cliqué
@@ -1337,21 +1040,21 @@ class MusicPlayer(QtWidgets.QMainWindow):
         self.music_data.sort(key=lambda x: x['display_name'])
         self.settings["sort_order"] = "Nom"
         save_settings(self.settings)  # Sauvegarde le mode de tri
-        self.update_music_list()
+        self.music_manager.update_music_list()
 
     def sort_by_date(self):
         """Trie les musiques par date de modification et sauvegarde le mode de tri."""
         self.music_data.sort(key=lambda x: x['mtime'])
         self.settings["sort_order"] = "Date de modification"
         save_settings(self.settings)  # Sauvegarde le mode de tri
-        self.update_music_list()
+        self.music_manager.update_music_list()
 
     def sort_by_size(self):
         """Trie les musiques par taille et sauvegarde le mode de tri."""
         self.music_data.sort(key=lambda x: x['size'])
         self.settings["sort_order"] = "Taille"
         save_settings(self.settings)  # Sauvegarde le mode de tri
-        self.update_music_list()
+        self.music_manager.update_music_list()
 
     def apply_current_sort(self):
         """Applique le tri selon le mode de tri sélectionné."""
@@ -1364,17 +1067,7 @@ class MusicPlayer(QtWidgets.QMainWindow):
             self.sort_by_size()
         else:
             print(f"Mode de tri inconnu : {sort_order}")
-
-    def update_music_list(self):
-        """Met à jour la liste des pistes en fonction du texte de recherche."""
-        search_text = self.search_var.text().lower()
-        self.tracklist.clear()
-        self.filtered_music_data = [
-            item for item in self.music_data if search_text in item['display_name']
-        ]
-        for item in self.filtered_music_data:
-            self.tracklist.addItem(item['display_name'])
-            
+       
     def closeEvent(self, event):
         """Gestion de la fermeture de l'application."""
         try:
@@ -1393,7 +1086,3 @@ class MusicPlayer(QtWidgets.QMainWindow):
         except Exception as e:
             print(f"Erreur lors de la fermeture: {e}")
             event.accept()
-
-    def update_music_counter(self):
-        """Met à jour le compteur des pistes."""
-        self.track_counter.setText(f"Total de musiques : {len(self.music_data)}")
