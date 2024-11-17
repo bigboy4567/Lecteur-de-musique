@@ -269,12 +269,9 @@ class AudioSpectrum(QtWidgets.QWidget):
             self.worker_running = False  # Arrêter le thread de calcul
     
     def resizeEvent(self, event):
-        """Repositionne la notification lorsque la fenêtre est redimensionnée."""
+        self._configure_bars()
         super().resizeEvent(event)
-        self.volume_notification.move(
-            self.width() // 2 - self.volume_notification.width() // 2,
-            self.height() // 2 - self.volume_notification.height() // 2
-        )
+
     def _configure_bars(self):
         """Configure les positions et largeurs des barres en fonction de la largeur du widget."""
         width = self.width()
@@ -288,7 +285,7 @@ class AudioSpectrum(QtWidgets.QWidget):
 
         # Position des barres
         self.bar_positions = np.cumsum(np.r_[0, self.bar_widths[:-1] + self.bar_spacing])
-
+        
     def update_gradient_cache(self):
         """Met à jour le cache de gradient partagé pour optimiser le dessin."""
         gradients = []
