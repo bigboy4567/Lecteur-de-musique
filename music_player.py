@@ -39,9 +39,6 @@ class MusicPlayer(QtWidgets.QMainWindow):
         self.setAcceptDrops(True)
         self.executor = None
 
-        self.scroll_timer = QtCore.QTimer(self)
-        self.scroll_timer.timeout.connect(self.scroll_text)
-
         # Initialisation du dossier des icônes
         self.icon_folder = os.path.join(os.path.dirname(__file__), "ICON")
         icon_path = os.path.join(self.icon_folder, "app_icon.png")
@@ -653,7 +650,7 @@ class MusicPlayer(QtWidgets.QMainWindow):
         mixer.music.set_volume(self.current_volume / 100.0)
         # Affiche la notification
         self.spectrum.show_volume_notification(f"Volume : {self.current_volume}%")
-        
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
@@ -683,31 +680,6 @@ class MusicPlayer(QtWidgets.QMainWindow):
             self.spectrum.set_background_color(color)
             self.settings['background_color'] = color.name()
             save_settings(self.settings)  # Utiliser la fonction importée pour sauvegarder les paramètres
-
-    def update_scroll(self):
-        """Démarre le défilement si le texte est trop long pour le label."""
-        self.scroll_text_full = self.current_track_label.text()
-        font_metrics = self.current_track_label.fontMetrics()
-        text_width = font_metrics.horizontalAdvance(self.scroll_text_full)
-        if text_width > self.current_track_label.width() - 20:  # Vérifie si le texte dépasse
-            self.scroll_text_full += "     "  # Ajoute de l'espace pour une transition fluide
-            if not self.scroll_timer.isActive():
-                self.scroll_position = 0
-                self.scroll_timer.start(50)  # Intervalle de défilement
-        else:
-            self.scroll_timer.stop()
-            self.scroll_position = 0
-            self.current_track_label.setText(self.scroll_text_full)
-
-    def scroll_text(self):
-        """Défile le texte de droite à gauche."""
-        visible_text_length = self.current_track_label.width() // 10  # Estimation des caractères visibles
-        display_text = (self.scroll_text_full + "     ") * 2  # Double le texte pour un défilement en continu
-        if self.scroll_position < len(self.scroll_text_full):
-            self.scroll_position += 1
-        else:
-            self.scroll_position = 0  # Réinitialiser la position pour un défilement fluide
-        self.current_track_label.setText(display_text[self.scroll_position:self.scroll_position + visible_text_length])
 
     def toggle_always_on_top(self):
         """Active ou désactive l'option 'Toujours au premier plan'."""
