@@ -1,3 +1,7 @@
+# Ce projet est sous licence MIT.
+# Copyright (c) 2024 Nicolas Q.
+
+
 # main.py
 import sys
 from PyQt6 import QtWidgets, QtGui, QtCore
