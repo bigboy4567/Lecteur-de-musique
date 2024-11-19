@@ -1,3 +1,7 @@
+# Ce projet est sous licence MIT.
+# Copyright (c) 2024 Nicolas Q.
+
+
 import numpy as np
 from scipy.fft import rfft
 from scipy.io import wavfile
@@ -5,6 +9,10 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from pygame import mixer
 import wave
 from PyQt6.QtWidgets import QLabel
+import os
+from PyQt6.QtCore import QPropertyAnimation
+import settings_manager
+from settings_manager import save_settings, load_settings
 
 class SpectrumWorker(QtCore.QObject):
     spectrum_updated = QtCore.pyqtSignal(np.ndarray)
@@ -80,7 +88,10 @@ class AudioSpectrum(QtWidgets.QWidget):
     def __init__(self, parent=None, chunk_size=16384):
         super().__init__(parent)
         self.setMinimumHeight(100)
-        
+
+        # Initialisation des paramètres
+        self.settings = load_settings()  # Charge les paramètres depuis le fichier JSON
+
         # Initialisation des paramètres de spectre
         self.bars = 150
         self.bar_spacing = 2
@@ -88,9 +99,9 @@ class AudioSpectrum(QtWidgets.QWidget):
         self.window = np.hanning(self.chunk_size)
         self.scale_factor = 1
         self.smoothing_factor = 0.5
-        self.spectrum_color = QtGui.QColor("#FF0000")
-        self.background_color = QtGui.QColor("#2A2A3A")
-        
+        self.spectrum_color = QtGui.QColor(self.settings.get("spectrum_color", "#FF0000"))  # Couleur par défaut rouge
+        self.background_color = QtGui.QColor(self.settings.get("background_color", "#2A2A3A"))  # Couleur par défaut gris
+
         # Créer un QLabel pour la notification
         self.volume_notification = QLabel(self)
         self.volume_notification.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -113,21 +124,25 @@ class AudioSpectrum(QtWidgets.QWidget):
             self.height() // 2 - self.volume_notification.height() // 2
         )
 
-
         # Données audio et de spectre
         self.spectrum_data = np.zeros(self.bars)
         self.sound_array = None
         self.sample_rate = None
         self.is_paused = True
-        
+
         # Paramètres de visualisation
         self.bar_positions = None
         self.bar_widths = None
         self.update_gradient_cache()
-        
+
         # Gestion des threads
         self.spectrum_worker_thread = None
         self.spectrum_worker = None
+
+    def reset_spectrum_data(self):
+        """Réinitialise les données du spectre à zéro."""
+        self.spectrum_data = np.zeros(self.bars)
+        self.update()  # Force le redessin immédiat
 
     def show_volume_notification(self, message):
         """Affiche une notification de volume avec une animation de zoom avant."""
@@ -169,6 +184,30 @@ class AudioSpectrum(QtWidgets.QWidget):
         self.volume_hide_animation.start()
         self.volume_hide_animation.finished.connect(lambda: self.volume_notification.setVisible(False))
         
+    def change_spectrum_color(self):
+        """Ouvre une boîte de dialogue pour choisir la couleur du spectre."""
+        if not hasattr(self, 'settings'):
+            print("Erreur : 'settings' non défini.")
+            return
+
+        color_dialog = QtWidgets.QColorDialog(self)
+        color_dialog.setWindowTitle("Choisissez la couleur du spectre")
+
+        color_dialog.setCurrentColor(QtGui.QColor(self.settings.get("spectrum_color", "#FF0000")))
+        if color_dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            color = color_dialog.selectedColor()
+            if not isinstance(color, QtGui.QColor):
+                print("Erreur : Couleur sélectionnée invalide.")
+                return
+
+            self.set_spectrum_color(color)
+            self.settings['spectrum_color'] = color.name()  # Sauvegarde sous forme de chaîne
+            try:
+                save_settings(self.settings)
+                print("Paramètres sauvegardés avec succès.")
+            except Exception as e:
+                print(f"Erreur de sauvegarde des paramètres : {e}")
+
     def update_gradient_cache(self):
         """Met à jour le cache de gradient partagé pour optimiser le dessin."""
         gradients = [
@@ -211,15 +250,17 @@ class AudioSpectrum(QtWidgets.QWidget):
 
     def restart_spectrum_worker(self):
         """Redémarre le SpectrumWorker avec les paramètres actuels sans perturber l'affichage."""
-        # Si le spectre est en pause, ne redémarre pas le calcul, mais maintient l'affichage
-        if getattr(self, 'paused', False):
-            print("Le spectre est en pause, le worker ne sera pas redémarré.")
-            return
+        # Sauvegarder l'état actuel
+        current_spectrum = self.spectrum_data.copy()
         
-        # Stopper l'ancien worker s'il existe
+        # Arrêter l'ancien worker
         self.stop_spectrum_worker()
-        
-        # Configurer un nouveau thread et worker pour le spectre
+
+        # Restaurer l'état visuel
+        self.spectrum_data = current_spectrum
+        self.update()
+
+        # Démarrage d'un nouveau worker pour le spectre
         self.spectrum_worker_thread = QtCore.QThread()
         self.spectrum_worker = SpectrumWorker(
             audio_data=self.sound_array,
@@ -232,18 +273,13 @@ class AudioSpectrum(QtWidgets.QWidget):
             smoothing_factor=self.smoothing_factor,
             scale_factor=self.scale_factor
         )
-        # Connecter le signal pour mettre à jour l'affichage
+        
+        # Configuration et démarrage du nouveau worker avec l'état préservé
+        self.spectrum_worker.spectrum_data = current_spectrum  # Initialiser avec l'état actuel
         self.spectrum_worker.spectrum_updated.connect(self.update_spectrum_data)
-        
-        # Déplacer le worker vers le nouveau thread
         self.spectrum_worker.moveToThread(self.spectrum_worker_thread)
-        
-        # Lancer le worker lorsque le thread démarre
         self.spectrum_worker_thread.started.connect(self.spectrum_worker.run)
-        
-        # Démarrer le thread
         self.spectrum_worker_thread.start()
-        print("SpectrumWorker redémarré avec succès.")
 
     def stop_spectrum_worker(self):
         """Arrête le thread du SpectrumWorker."""
@@ -292,8 +328,8 @@ class AudioSpectrum(QtWidgets.QWidget):
         for _ in range(self.bars):
             gradient = QtGui.QLinearGradient(0, 0, 0, 1)
             gradient.setCoordinateMode(QtGui.QGradient.CoordinateMode.ObjectBoundingMode)
-            gradient.setColorAt(0, self.spectrum_color.lighter(120))
-            gradient.setColorAt(1, self.spectrum_color.darker(120))
+            gradient.setColorAt(0, self.spectrum_color.lighter(120))  # Couleur en haut de la barre
+            gradient.setColorAt(1, self.spectrum_color.darker(120))  # Couleur en bas de la barre
             gradients.append(gradient)
         AudioSpectrum.shared_gradient_cache = gradients
 
@@ -313,6 +349,10 @@ class AudioSpectrum(QtWidgets.QWidget):
     def set_spectrum_color(self, color):
         """Met à jour la couleur du spectre et actualise le cache de gradient."""
         self.spectrum_color = color
+        try:
+            settings_manager.save_spectrum_color(color.name())  # Sauvegarde uniquement le nom
+        except Exception as e:
+            print(f"Erreur de sauvegarde de la couleur du spectre : {e}")
         self.update_gradient_cache()
         self.update()
 
@@ -322,6 +362,10 @@ class AudioSpectrum(QtWidgets.QWidget):
         self.update()
 
     def paintEvent(self, event):
+        if self.bar_positions is None or self.bar_widths is None:
+            print("Bar positions or widths not configured correctly. Configuring now.")
+            self._configure_bars()
+
         painter = QtGui.QPainter(self)
 
         # Créer un chemin avec un rectangle arrondi pour toute la zone du spectre
@@ -335,27 +379,188 @@ class AudioSpectrum(QtWidgets.QWidget):
         # Appliquer un clip path pour restreindre le dessin à l'intérieur du rectangle arrondi
         painter.setClipPath(rounded_rect_path)
 
-        # Vérifier les positions et dimensions des barres
-        if self.bar_positions is None or self.bar_widths is None:
-            self._configure_bars()
+        if self.bar_positions is not None and self.bar_widths is not None:
+            # Dessiner les barres du spectre
+            for i, amplitude in enumerate(self.spectrum_data):
+                if i >= len(self.bar_positions) or i >= len(self.bar_widths):
+                    print(f"Index out of bounds: i={i}, len(bar_positions)={len(self.bar_positions)}, len(bar_widths)={len(self.bar_widths)}")
+                    break
 
-        # Dessiner les barres du spectre avec des coins arrondis uniquement en haut
-        for i, amplitude in enumerate(self.spectrum_data):
-            bar_h = amplitude * self.height()
-            y = self.height() - bar_h
+                bar_h = amplitude * self.height()
+                y = self.height() - bar_h
 
-            if bar_h > 10:  # Si la barre est assez grande pour l'arrondi
-                # Créer le rectangle principal pour la barre avec une base droite
-                rect = QtCore.QRectF(self.bar_positions[i], y + 5, self.bar_widths[i], bar_h - 5)
-                painter.fillRect(rect, AudioSpectrum.shared_gradient_cache[i])
-
-                # Ajouter un léger arrondi en haut
-                top_rect = QtCore.QRectF(self.bar_positions[i], y, self.bar_widths[i], 10)
-                path = QtGui.QPainterPath()
-                path.addRoundedRect(top_rect, 5, 5)
-                painter.fillPath(path, AudioSpectrum.shared_gradient_cache[i])
-            else:
-                # Si la barre est trop petite, dessiner un rectangle simple sans arrondi
                 rect = QtCore.QRectF(self.bar_positions[i], y, self.bar_widths[i], bar_h)
                 painter.fillRect(rect, AudioSpectrum.shared_gradient_cache[i])
-                
+
+class FullScreenSpectrum(QtWidgets.QWidget):
+    """Fenêtre pour afficher le spectre en plein écran avec animation améliorée."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+        self.setWindowTitle("Mode Plein Écran")
+        self.setWindowFlags(QtCore.Qt.WindowType.Window)
+        self.setStyleSheet("background-color: black;")
+
+        # Configuration du layout principal
+        main_layout = QtWidgets.QVBoxLayout(self)
+
+        # Déplacer temporairement le spectre principal dans cette fenêtre
+        self.spectrum = parent.spectrum
+        main_layout.addWidget(self.spectrum)
+
+        self.setLayout(main_layout)
+
+        # Créer les layouts pour les boutons
+        controls_layout = QtWidgets.QHBoxLayout()
+        settings_layout = QtWidgets.QHBoxLayout()
+
+        # Boutons de contrôle
+        self.previous_button = QtWidgets.QPushButton()
+        self.previous_button.setIcon(QtGui.QIcon(os.path.join(parent.icon_folder, "backward_icon.png")))
+        self.previous_button.setIconSize(QtCore.QSize(50, 50))
+        self.previous_button.clicked.connect(parent.music_manager.play_previous_music)
+        controls_layout.addWidget(self.previous_button)
+
+        self.play_button = QtWidgets.QPushButton()
+        self.update_play_button_icon()
+        self.play_button.setIconSize(QtCore.QSize(50, 50))
+        self.play_button.clicked.connect(self.toggle_play_pause_in_fullscreen)
+        controls_layout.addWidget(self.play_button)
+
+        self.next_button = QtWidgets.QPushButton()
+        self.next_button.setIcon(QtGui.QIcon(os.path.join(parent.icon_folder, "forward_icon.png")))
+        self.next_button.setIconSize(QtCore.QSize(50, 50))
+        self.next_button.clicked.connect(parent.music_manager.play_next_music)
+        controls_layout.addWidget(self.next_button)
+
+        # Boutons des paramètres
+        self.color_button = QtWidgets.QPushButton("Couleur Spectre")
+        self.color_button.clicked.connect(self.spectrum.change_spectrum_color)
+        settings_layout.addWidget(self.color_button)
+
+        self.background_button = QtWidgets.QPushButton("Couleur Fond")
+        self.background_button.clicked.connect(parent.change_background_color)
+        settings_layout.addWidget(self.background_button)
+
+        self.chunk_size_button = QtWidgets.QPushButton("Taille Chunk")
+        self.chunk_size_button.clicked.connect(self.open_chunk_size_menu)
+        settings_layout.addWidget(self.chunk_size_button)
+
+        self.exit_button = QtWidgets.QPushButton("Quitter")
+        self.exit_button.clicked.connect(self.animate_exit)
+        settings_layout.addWidget(self.exit_button)
+
+        # Ajouter les layouts
+        main_layout.addLayout(controls_layout)
+        main_layout.addLayout(settings_layout)
+
+        # Configuration de l'animation
+        self.animation = QPropertyAnimation(self, b"geometry")
+        self.animation.setDuration(700)  # Durée augmentée pour plus de fluidité
+        self.animation.setEasingCurve(QtCore.QEasingCurve.Type.InOutQuad)
+
+        # Lancer l'animation d'entrée
+        self.animate_enter()
+
+    def toggle_play_pause_in_fullscreen(self):
+        """Appelle la méthode principale pour gérer Lecture/Pause et met à jour l'icône."""
+        self.parent.toggle_play_pause()
+        self.update_play_button_icon()
+
+    def update_play_button_icon(self):
+        """Mise à jour de l'icône du bouton Lecture/Pause."""
+        if self.parent.playing and not self.parent.paused:
+            icon_path = os.path.join(self.parent.icon_folder, "pause_icon.png")
+        else:
+            icon_path = os.path.join(self.parent.icon_folder, "play_icon.png")
+        self.play_button.setIcon(QtGui.QIcon(icon_path))
+
+    def open_chunk_size_menu(self):
+        """Affiche un menu pour sélectionner la taille des chunks."""
+        menu = QtWidgets.QMenu(self)
+        for size in [4096, 8192, 16384, 32768]:
+            action = QtGui.QAction(f"{size}", self)
+            action.setCheckable(True)
+            action.setChecked(self.parent.chunk_size == size)
+            action.triggered.connect(lambda _, s=size: self.parent.set_chunk_size(s))
+            menu.addAction(action)
+
+        menu.exec(self.chunk_size_button.mapToGlobal(QtCore.QPoint(0, self.chunk_size_button.height())))
+
+    def animate_enter(self):
+        """Anime l'entrée en mode plein écran avec un zoom progressif."""
+        # Cacher la fenêtre parent
+        self.parent.hide()
+        
+        # Rendre la fenêtre transparente au début
+        self.setWindowOpacity(0.0)
+        
+        # Calcul des géométries
+        start_geometry = self.parent.geometry()
+        end_geometry = QtWidgets.QApplication.primaryScreen().availableGeometry()
+
+        # Configuration de l'animation de géométrie
+        self.geometry_animation = QPropertyAnimation(self, b"geometry")
+        self.geometry_animation.setDuration(700)
+        self.geometry_animation.setEasingCurve(QtCore.QEasingCurve.Type.InOutQuad)
+        self.geometry_animation.setStartValue(start_geometry)
+        self.geometry_animation.setEndValue(end_geometry)
+
+        # Configuration de l'animation d'opacité
+        self.opacity_animation = QPropertyAnimation(self, b"windowOpacity")
+        self.opacity_animation.setDuration(700)
+        self.opacity_animation.setStartValue(0.0)
+        self.opacity_animation.setEndValue(1.0)
+
+        # Groupe d'animation
+        self.animation_group = QtCore.QParallelAnimationGroup()
+        self.animation_group.addAnimation(self.geometry_animation)
+        self.animation_group.addAnimation(self.opacity_animation)
+
+        # Définir la géométrie initiale et afficher la fenêtre
+        self.setGeometry(start_geometry)
+        self.show()
+
+        # Démarrer les animations
+        self.animation_group.start()
+
+        # Actions après l'animation
+        self.animation_group.finished.connect(self.raise_)
+        self.animation_group.finished.connect(self.activateWindow)
+
+    def animate_exit(self):
+        """Anime la sortie du mode plein écran avec un zoom progressif."""
+        # Calcul de la position centrale pour revenir au mode initial
+        end_geometry = self.parent.geometry()
+
+        # Configuration de l'animation de géométrie
+        self.geometry_animation = QPropertyAnimation(self, b"geometry")
+        self.geometry_animation.setDuration(700)
+        self.geometry_animation.setEasingCurve(QtCore.QEasingCurve.Type.InOutQuad)
+        self.geometry_animation.setStartValue(self.geometry())
+        self.geometry_animation.setEndValue(end_geometry)
+
+        # Configuration de l'animation d'opacité
+        self.opacity_animation = QPropertyAnimation(self, b"windowOpacity")
+        self.opacity_animation.setDuration(700)
+        self.opacity_animation.setStartValue(1.0)
+        self.opacity_animation.setEndValue(0.0)
+
+        # Groupe d'animation
+        self.animation_group = QtCore.QParallelAnimationGroup()
+        self.animation_group.addAnimation(self.geometry_animation)
+        self.animation_group.addAnimation(self.opacity_animation)
+
+        # Connecter la fin de l'animation
+        self.animation_group.finished.connect(self.close)
+        self.animation_group.finished.connect(self.parent.show)  # Réafficher la fenêtre parent
+
+        # Démarrer les animations
+        self.animation_group.start()
+
+    def closeEvent(self, event):
+        """Restaure le spectre à sa position dans la fenêtre principale lors de la fermeture."""
+        if self.parent and self.spectrum:
+            self.parent.central_widget.layout().insertWidget(0, self.spectrum)
+        event.accept()
