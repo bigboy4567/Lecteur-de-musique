@@ -1,3 +1,7 @@
+# Ce projet est sous licence MIT.
+# Copyright (c) 2024 Nicolas Q.
+
+
 import os
 import random
 import shutil
@@ -26,27 +30,32 @@ class MusicManager:
 
     def play_previous_music(self):
         """Passe à la musique précédente."""
-        if self.parent.played_tracks_history:
-            self.parent.current_track_index = self.parent.played_tracks_history.pop()
-        else:
-            self.parent.current_track_index -= 1
-            if self.parent.current_track_index < 0:
-                self.parent.current_track_index = 0
-                return
+        try:
+            # Vérifie si l'historique des pistes existe et contient des éléments
+            if hasattr(self.parent, 'played_tracks_history') and self.parent.played_tracks_history:
+                self.parent.current_track_index = self.parent.played_tracks_history.pop()
+            else:
+                # Si l'historique est vide ou n'existe pas, passe à l'index précédent
+                self.parent.current_track_index -= 1
+                if self.parent.current_track_index < 0:
+                    self.parent.current_track_index = 0
+                    return
 
-        self.parent.tracklist.setCurrentRow(self.parent.current_track_index)
-        self.play_music()
+            # Met à jour la sélection de la liste de pistes
+            self.parent.tracklist.setCurrentRow(self.parent.current_track_index)
 
-    def stop_music(self):
-        """Arrête la musique et met à jour les statistiques."""
-        if self.parent.playing:
-            self.stop_tracking_time()
+            # Lance la lecture de la piste précédente
+            self.play_music()
 
-        mixer.music.stop()
-        self.parent.playing = False
-        self.parent.paused = False
-        self.parent.progress_timer.stop()
-        self.parent.play_button.setIcon(QtGui.QIcon(os.path.join(self.parent.icon_folder, "play_icon.png")))
+            # Débogage : affiche l'état de l'historique après modification
+            print(f"Nouvel historique des pistes : {self.parent.played_tracks_history}")
+
+        except AttributeError as e:
+            # Gestion d'erreur si l'attribut n'existe pas
+            print(f"Erreur : {e}. Vérifiez que 'played_tracks_history' est bien initialisé dans MusicPlayer.")
+        except Exception as e:
+            # Gestion d'autres exceptions éventuelles
+            print(f"Une erreur inattendue s'est produite : {e}")
 
     def play_next_music(self):
         """Passe à la musique suivante."""
@@ -71,22 +80,33 @@ class MusicManager:
         self.parent.tracklist.setCurrentRow(self.parent.current_track_index)
         self.play_music()
 
-    def play_music(self):
-        """Joue la musique sélectionnée."""
+    def play_music(self, force_restart=False):
+        """Joue la musique sélectionnée ou redémarre la piste actuelle si nécessaire."""
         try:
             # Vérifiez si une piste est sélectionnée dans la liste
             if 0 <= self.parent.tracklist.currentRow() < len(self.parent.filtered_music_data):
+                # Initialiser played_tracks_history s'il n'existe pas
+                if not hasattr(self.parent, 'played_tracks_history'):
+                    self.parent.played_tracks_history = []
+
+                # Vérifiez si on est en mode répétition de piste ou si une nouvelle piste est sélectionnée
+                if self.parent.repeat_mode == "track" and not force_restart:
+                    print("Mode répétition de piste activé. Redémarrage de la piste.")
+                else:
+                    # Mettre à jour l'index de la piste actuelle uniquement si ce n'est pas une répétition
+                    self.parent.current_track_index = self.parent.tracklist.currentRow()
+                    print(f"Piste sélectionnée : {self.parent.current_track_index}")
+
                 # Ajouter l'indice actuel à l'historique si ce n'est pas déjà fait
-                if self.parent.current_track_index != -1 and (
-                    not self.parent.played_tracks_history or self.parent.played_tracks_history[-1] != self.parent.current_track_index):
+                if (
+                    self.parent.current_track_index != -1 and
+                    (not self.parent.played_tracks_history or self.parent.played_tracks_history[-1] != self.parent.current_track_index)
+                ):
                     self.parent.played_tracks_history.append(self.parent.current_track_index)
 
                 # Arrêter le suivi du temps pour l'ancien morceau, s'il existe
                 if self.parent.playing:
                     self.stop_tracking_time()
-
-                # Mettre à jour l'index de la piste actuelle
-                self.parent.current_track_index = self.parent.tracklist.currentRow()
 
                 # Récupération des informations sur la piste
                 selected_track = self.parent.filtered_music_data[self.parent.current_track_index]
@@ -127,18 +147,22 @@ class MusicManager:
                 self.parent.playing = True
                 self.parent.paused = False
 
-                # Démarrer le spectre audio après la musique
+                # Réinitialiser les données du spectre avant de charger la nouvelle musique
+                self.parent.spectrum.reset_spectrum_data()
+
+                # Charger et démarrer le spectre audio avec la nouvelle musique
                 QtCore.QTimer.singleShot(0, lambda: self.parent.spectrum.load_audio_file(track_name))
-                QtCore.QTimer.singleShot(0, lambda: self.parent.spectrum.set_paused(False))
+                QtCore.QTimer.singleShot(0, lambda: self.parent.spectrum.restart_spectrum_worker())
 
                 # Mettre à jour le temps total pour l'affichage dès que la piste change
                 self.parent.update_time_label(0)
 
                 # Démarrer le suivi du temps d'écoute
                 self.start_tracking_time(display_name)
-
             else:
                 print("Aucune piste sélectionnée ou liste vide.")
+        except AttributeError as e:
+            print(f"Erreur d'attribut : {e}. Vérifiez l'initialisation des attributs nécessaires.")
         except Exception as e:
             print(f"Erreur lors de la lecture du fichier : {e}")
             self.parent.playing = False
@@ -149,7 +173,7 @@ class MusicManager:
     def check_music_end(self):
         """Vérifie si la musique est terminée et gère la fin de la piste."""
         if self.parent.playing and not self.parent.paused and not mixer.music.get_busy():
-            self.parent.handle_track_end()
+            self.handle_track_end()
 
     def start_tracking_time(self, track_name):
         """Démarre ou reprend le suivi du temps d'écoute pour une piste."""
@@ -189,22 +213,20 @@ class MusicManager:
         # Vérifie le mode de répétition
         if self.parent.repeat_mode == "track":
             # Rejoue la même piste
+            print("Mode répétition de piste activé. Redémarrage de la piste actuelle.")
             if 0 <= self.parent.current_track_index < len(self.parent.filtered_music_data):
                 self.parent.tracklist.setCurrentRow(self.parent.current_track_index)
-                self.play_music()  # Utilise la méthode locale
+                self.play_music(force_restart=True)
         elif self.parent.repeat_mode == "playlist":
             # Passe à la piste suivante ou revient au début si nécessaire
-            self.play_next_music()  # Corrigé pour appeler la méthode locale
+            self.play_next_music()
         else:
-            # Mode normal : arrête si c'est la dernière piste
-            if self.parent.current_track_index < len(self.parent.filtered_music_data) - 1:
-                self.play_next_music()  # Corrigé pour appeler la méthode locale
-            else:
-                # Fin de la lecture
-                self.parent.play_button.setIcon(QtGui.QIcon(os.path.join(self.parent.icon_folder, "play_icon.png")))
-                self.parent.playing = False
-                self.parent.progress.setValue(0)
-                self.parent.progress_timer.stop()
+            # Aucun mode de répétition, arrêter la lecture
+            print("Aucun mode de répétition actif. Arrêt de la lecture.")
+            self.parent.play_button.setIcon(QtGui.QIcon(os.path.join(self.parent.icon_folder, "play_icon.png")))
+            self.parent.playing = False
+            self.parent.progress.setValue(0)
+            self.parent.progress_timer.stop()
 
     def restore_music(self):
         """Restaure la dernière piste supprimée."""
