@@ -1,3 +1,7 @@
+# Ce projet est sous licence MIT.
+# Copyright (c) 2024 Nicolas Q.
+
+
 import os
 import random
 from PyQt6 import QtWidgets, QtGui, QtCore
@@ -5,7 +9,7 @@ from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import QProgressBar, QFileDialog, QMessageBox, QColorDialog, QSlider, QLabel
 from concurrent.futures import ThreadPoolExecutor
 from pygame import mixer
-from spectrum import AudioSpectrum
+from spectrum import AudioSpectrum, FullScreenSpectrum
 from settings_manager import load_settings, save_settings, load_music_files_from_storage, load_stats, save_stats
 import wave
 import json
@@ -109,7 +113,6 @@ class MusicPlayer(QtWidgets.QMainWindow):
         
         # Initialisation de l'affichage du spectre audio avec la taille de chunk chargée
         self.spectrum = AudioSpectrum(self)
-        print("Initialisation du spectre audio avec chunk_size:", self.chunk_size)  # Débogage
         self.spectrum.update_chunk_size(self.chunk_size)  # Appliquer la taille du chunk au spectre audio
 
         # Ajouter le spectre audio au layout principal
@@ -136,6 +139,9 @@ class MusicPlayer(QtWidgets.QMainWindow):
         self.music_manager.update_music_list()  # Actualiser la liste avec les données chargées
         self.music_manager.update_music_counter()  # Mettre à jour le compteur avec le nombre de musiques
 
+        # Initialise l'historique des pistes jouées
+        self.played_tracks_history = []
+
         # Initialise le volume avec une valeur par défaut.
         self.current_volume = round(mixer.music.get_volume() * 100)  # Stocke le volume actuel en pourcentage
 
@@ -158,75 +164,94 @@ class MusicPlayer(QtWidgets.QMainWindow):
         stats[track_name]["plays"] += 1
         save_stats(stats)
 
+    def toggle_fullscreen_spectrum(self):
+        """Active ou désactive le mode plein écran pour le spectre."""
+        if hasattr(self, 'fullscreen_window') and self.fullscreen_window and self.fullscreen_window.isVisible():
+            # Sortie du mode plein écran avec une animation
+            self.fullscreen_window.animate_exit()  # Utilise l'animation de sortie
+        else:
+            # Entrée en mode plein écran
+            self.fullscreen_window = FullScreenSpectrum(self)  # Crée une fenêtre plein écran
+            self.fullscreen_window.showFullScreen()
+
+            # Ajout du raccourci F11 pour quitter le mode plein écran
+            fullscreen_shortcut = QtGui.QShortcut(QtGui.QKeySequence("F11"), self.fullscreen_window)
+            fullscreen_shortcut.activated.connect(self.fullscreen_window.animate_exit)
+
     def set_chunk_size(self, size):
         """Change la taille du chunk et met à jour la configuration en temps réel."""
         self.chunk_size = int(size)  # Assurez-vous que size est un entier
-        print("Mise à jour de la taille du chunk à :", self.chunk_size)  # Débogage
         self.settings['chunk_size'] = self.chunk_size  # Mettre à jour le paramètre de taille de chunk dans les settings
         save_settings(self.settings)  # Sauvegarde tous les paramètres, y compris la taille des chunks
-
-        # Désélectionner toutes les autres tailles de chunk
         for action in self.chunk_size_menu.actions():
             action.setChecked(int(action.text()) == self.chunk_size)
-
-        # Mettre à jour la taille du chunk dans le spectre audio
         self.spectrum.update_chunk_size(self.chunk_size)
 
     def show_about_dialog(self):
         about_text = (
-            "<h2>AcoustiqAV</h2>"
+            "<h2>AcoustiqAV 🎶</h2>"
             "<p><strong>Développé par :</strong> Nicolas Q.</p>"
-            "<p><strong>Version :</strong> 1.1.0 - Dernière mise à jour : novembre 2024</p>"
+            "<p><strong>Version actuelle :</strong> 1.2.0</p>"
             "<p><strong>Licence :</strong> MIT</p>"
-            "<p><strong>Compatibilité :</strong> Windows et macOS</p>"
-            "<p><strong>Objectif :</strong> Ce projet vise à offrir une expérience musicale immersive grâce à une interface intuitive, "
-            "un spectre audio dynamique, et de nouvelles fonctionnalités avancées.</p>"
-            "<h3>Guide de démarrage rapide</h3>"
+            "<p><strong>Compatibilité :</strong> Windows</p>"
+            "<p><strong>Objectif :</strong> Offrir une expérience musicale immersive grâce à une interface moderne et intuitive, "
+            "complétée par un spectre audio dynamique et des fonctionnalités avancées.</p>"
+            "<h3>📖 Guide de démarrage rapide</h3>"
             "<ul>"
-            "<li>Charger un fichier WAV en utilisant l'option <em>Ouvrir</em> dans le menu.</li>"
-            "<li>Utiliser les commandes de lecture, pause et arrêt pour contrôler la musique.</li>"
-            "<li>Accéder au menu <em>Visualisation</em> pour personnaliser les couleurs, la taille des chunks, et bien plus.</li>"
+            "<li><strong>Charger une musique :</strong> Utilisez l'option <em>Ouvrir</em> dans le menu pour charger vos fichiers WAV.</li>"
+            "<li><strong>Personnalisation :</strong> Accédez au menu <em>Visualisation</em> pour ajuster les couleurs et les options avancées.</li>"
+            "</ul>"
+            "<h3>🎮 Commandes</h3>"
+            "<ul>"
+            "<li><strong>Lecture/Pause :</strong> Utilisez le bouton <em>Lecture</em> ou <em>Pause</em> pour contrôler la musique.</li>"
+            "<li><strong>Piste suivante/précédente :</strong> Passez à la piste suivante ou précédente avec les boutons dédiés.</li>"
+            "<li><strong>Mode plein écran :</strong> Activez le mode plein écran pour une visualisation immersive en appuyant sur <strong>F11</strong> ou via le menu.</li>"
+            "<li><strong>Raccourcis clavier :</strong>"
+            "<ul>"
+            "<li><strong>Espace :</strong> Lecture/Pause</li>"
+            "<li><strong>Flèche haut :</strong> Augmenter le volume</li>"
+            "<li><strong>Flèche bas :</strong> Diminuer le volume</li>"
+            "<li><strong>F11 :</strong> Activer/Désactiver le mode plein écran</li>"
+            "</ul>"
+            "</li>"
             "</ul>"
             "<p><strong>Formats audio supportés :</strong> WAV uniquement</p>"
-            "<h3>Historique des Versions</h3>"
+            "<h3>🛠️ Historique des Versions</h3>"
             "<ul>"
-            "<li><strong>1.1.0 :</strong> Ajout du menu <em>Visualisation</em>, réorganisation des paramètres, "
-            "et optimisation des options de personnalisation du spectre audio.</li>"
-            "<li><strong>1.0.1 :</strong> Correction de bugs mineurs, ajout de la fonction pause.</li>"
+            "<li><strong>1.1.0 :</strong> Ajout du menu <em>Visualisation</em>, personnalisation des couleurs et gestion des chunks FFT.</li>"
+            "<li><strong>1.0.1 :</strong> Correction de bugs mineurs, ajout de la fonction pause et stabilité améliorée.</li>"
             "<li><strong>1.0.0 :</strong> Version initiale avec prise en charge des fichiers WAV et spectre audio en temps réel.</li>"
             "</ul>"
-            "<h3>Nouveautés :</h3>"
+            "<p><strong>🔗 Crédits :</strong> Ce projet utilise des bibliothèques open-source :</p>"
             "<ul>"
-            "<li>Ajout d'un menu dédié <em>Visualisation</em> pour personnaliser les couleurs et gérer les options avancées.</li>"
-            "<li>Possibilité de changer la couleur du fond et du spectre.</li>"
-            "<li>Support pour la gestion avancée de la taille des chunks FFT.</li>"
+            "<li><em>PyQt6</em> : Interface graphique</li>"
+            "<li><em>numpy</em> et <em>scipy</em> : Calculs spectraux</li>"
+            "<li><em>pygame</em> : Gestion audio</li>"
             "</ul>"
-            "<p><strong>Crédits :</strong> Ce projet utilise des bibliothèques open-source telles que <em>PyQt6</em> pour l'interface graphique, "
-            "<em>numpy</em> et <em>scipy</em> pour les calculs spectraux, et <em>pygame</em> pour la gestion de l'audio.</p>"
-            "<p style='color:red;'>Remarque : Ce lecteur accepte uniquement les fichiers audio au format WAV.</p>"
+            "<p style='color:red;'>Remarque importante : Ce lecteur supporte uniquement les fichiers audio au format WAV.</p>"
         )
         QMessageBox.about(self, "À propos", about_text)
 
     def show_updates_dialog(self):
         updates_text = (
-            "<h2>Quoi de neuf ?</h2>"
+            "<h2>🆕 Quoi de neuf ?</h2>"
             "<p><strong>Version actuelle :</strong> 1.2.0 (novembre 2024)</p>"
-            "<h3>Dernières mises à jour :</h3>"
+            "<h3>Dernières améliorations :</h3>"
             "<ul>"
-            "<li><strong>Modes de répétition améliorés :</strong> Les modes de répétition (piste unique, playlist) fonctionnent maintenant de manière fiable dès le lancement de l'application. Le comportement est stable et intuitif lors de la lecture continue ou du retour manuel à une piste précédente.</li>"
-            "<li><strong>Correction des statistiques :</strong> Les statistiques d'écoute affichent désormais correctement la durée totale d'écoute pour chaque piste. Les données sont triées automatiquement en fonction du temps total d'écoute (de la plus longue à la plus courte). Les anomalies dans les calculs de durée ont été corrigées.</li>"
-            "<li><strong>Amélioration de la pause :</strong> La barre de progression et le spectre audio restent visibles et synchronisés, même après une pause prolongée. Cela garantit une expérience fluide et cohérente.</li>"
-            "<li><strong>Synchronisation des temps :</strong> Le compteur de temps associé à la barre de progression est désormais précis et réactif, même lorsque vous changez manuellement de piste via la liste des musiques. Plus aucune déviation entre l'état réel et affiché.</li>"
-            "<li><strong>Visualisation persistante :</strong> Le spectre audio reste activé et en fonctionnement après des pauses, des reprises ou des modifications dans la lecture, offrant une continuité visuelle parfaite.</li>"
-            "<li><strong>Compatibilité renforcée :</strong> De nombreux ajustements ont été apportés pour améliorer les performances sur macOS et Windows. Les menus, icônes et comportements spécifiques aux systèmes sont désormais homogènes.</li>"
-            "<li><strong>Gestion des erreurs :</strong> Les erreurs liées aux fichiers manquants ou endommagés sont maintenant mieux gérées, avec des messages explicites pour guider l'utilisateur.</li>"
-            "<li><strong>Mises à jour esthétiques :</strong> Amélioration des styles pour une meilleure lisibilité, y compris dans les menus et dialogues comme celui des statistiques et des nouveautés.</li>"
+            "<li><strong>🔄 Modes de répétition améliorés :</strong> Les modes de répétition (piste unique, playlist) fonctionnent maintenant parfaitement dès le lancement de l'application. L'expérience utilisateur est stable, qu'il s'agisse de lectures continues ou de retours manuels sur des pistes.</li>"
+            "<li><strong>📊 Statistiques d'écoute corrigées :</strong> Les durées totales d'écoute sont désormais calculées et triées correctement, du plus long au plus court. Toutes les anomalies dans les calculs ont été résolues.</li>"
+            "<li><strong>⏸️ Pause améliorée :</strong> La barre de progression et le spectre audio restent visibles et synchronisés après une pause prolongée, assurant une expérience utilisateur fluide.</li>"
+            "<li><strong>⏱️ Synchronisation précise des temps :</strong> Le compteur de temps et la barre de progression sont maintenant réactifs et exacts, même après un changement manuel de piste.</li>"
+            "<li><strong>🎵 Visualisation audio persistante :</strong> Le spectre audio reste actif après des pauses, des reprises ou des changements de pistes, offrant une continuité visuelle sans faille.</li>"
+            "<li><strong>💻 Compatibilité renforcée :</strong> De nombreuses optimisations ont été réalisées pour garantir une expérience homogène sur Windows.</li>"
+            "<li><strong>🚨 Gestion améliorée des erreurs :</strong> Les problèmes liés aux fichiers manquants ou endommagés affichent désormais des messages clairs pour aider l'utilisateur à résoudre facilement les situations.</li>"
+            "<li><strong>✨ Améliorations visuelles :</strong> Des styles plus modernes et lisibles ont été appliqués aux menus et dialogues, notamment ceux des statistiques et des nouveautés.</li>"
             "</ul>"
-            "<h3>Historique des mises à jour :</h3>"
+            "<h3>📜 Historique des mises à jour :</h3>"
             "<ul>"
-            "<li><strong>1.2.0 :</strong> Modes de répétition avancés, correction et tri des statistiques, synchronisation améliorée des temps, stabilité accrue.</li>"
+            "<li><strong>1.2.0 :</strong> Modes de répétition avancés, correction et tri des statistiques, synchronisation des temps et meilleure compatibilité système.</li>"
             "<li><strong>1.1.0 :</strong> Ajout du menu <em>Visualisation</em>, personnalisation des couleurs et gestion avancée des chunks FFT.</li>"
-            "<li><strong>1.0.1 :</strong> Correction de bugs mineurs, ajout de la fonction pause, et compatibilité initiale macOS/Windows.</li>"
+            "<li><strong>1.0.1 :</strong> Correction de bugs mineurs, fonction pause ajoutée, et compatibilité initiale Windows.</li>"
             "<li><strong>1.0.0 :</strong> Version initiale avec prise en charge des fichiers WAV et spectre audio en temps réel.</li>"
             "</ul>"
         )
@@ -260,35 +285,47 @@ class MusicPlayer(QtWidgets.QMainWindow):
         refresh_action.triggered.connect(self.music_manager.refresh_music_folder)
         settings_menu.addAction(refresh_action)
 
+        # Ajouter une action pour activer le mode plein écran
+        fullscreen_action = QAction("Mode Plein Écran", self)
+        fullscreen_action.triggered.connect(self.toggle_fullscreen_spectrum)
+        settings_menu.addAction(fullscreen_action)  # Ajout du bouton dans le menu Paramètres
+
+        # Ajouter le raccourci clavier pour basculer le mode plein écran
+        self.fullscreen_shortcut = QtGui.QShortcut(QtGui.QKeySequence("F11"), self)
+        self.fullscreen_shortcut.activated.connect(self.toggle_fullscreen_spectrum)
+
         # Menu Visualisation
         visualization_menu = menubar.addMenu("Visualisation")
 
         # Option pour changer la couleur du spectre
         self.change_color_action = QAction("Changer la couleur du spectre", self)
-        self.change_color_action.triggered.connect(self.change_spectrum_color)
+        self.change_color_action.triggered.connect(lambda: self.spectrum.change_spectrum_color())
         visualization_menu.addAction(self.change_color_action)
-
-        self.played_tracks_history = []  # Historique des indices des pistes jouées
 
         # Option pour changer la couleur de fond
         self.change_background_color_action = QAction("Changer la couleur de fond", self)
-        self.change_background_color_action.triggered.connect(self.change_background_color)
+        self.change_background_color_action.triggered.connect(lambda: self.change_background_color())
         visualization_menu.addAction(self.change_background_color_action)
 
         # Option pour sélectionner la taille du chunk
         self.chunk_size_menu = QtWidgets.QMenu("Taille du Chunk", self)
         for size in [4096, 8192, 16384, 32768]:
-            action = QtGui.QAction(f"{size}", self)
-            action.setCheckable(True)
-            action.setChecked(self.chunk_size == size)
-            action.triggered.connect(lambda _, s=size: self.set_chunk_size(s))
-            self.chunk_size_menu.addAction(action)
+                action = QtGui.QAction(f"{size}", self)
+                action.setCheckable(True)
+                action.setChecked(self.chunk_size == size)
+                action.triggered.connect(lambda _, s=size: self.set_chunk_size(s))
+                self.chunk_size_menu.addAction(action)
         visualization_menu.addMenu(self.chunk_size_menu)
 
+        # Menu Statistiques
+        stats_action = QAction("Statistiques", self)
+        stats_action.triggered.connect(self.show_stats_dialog)
+        menubar.addAction(stats_action)
+
         # Menu Nouveautés
-        updates_menu = QAction("Nouveautés", self)
-        updates_menu.triggered.connect(self.show_updates_dialog)
-        menubar.addAction(updates_menu)
+        updates_action = QAction("Nouveautés", self)
+        updates_action.triggered.connect(self.show_updates_dialog)
+        menubar.addAction(updates_action)
 
         # Menu À propos
         about_action = QAction("À propos", self)
@@ -298,11 +335,6 @@ class MusicPlayer(QtWidgets.QMainWindow):
         # Couleurs du spectre et de fond à partir des paramètres
         spectrum_color = self.settings.get("spectrum_color", "#FF0000")
         background_color = self.settings.get("background_color", "#2A2A3A")
-
-        # Initialisation de l'affichage du spectre
-        self.spectrum = AudioSpectrum(self)
-        self.spectrum.set_spectrum_color(QtGui.QColor(spectrum_color))
-        self.spectrum.set_background_color(QtGui.QColor(background_color))
 
         # Ajouter les raccourcis clavier
         self.shortcut_play_pause = QtGui.QShortcut(QtGui.QKeySequence("Space"), self)
@@ -520,15 +552,6 @@ class MusicPlayer(QtWidgets.QMainWindow):
         self.add_music_button.setStyleSheet(button_style)
         self.add_music_button.clicked.connect(self.music_manager.add_music_files)
 
-        self.delete_button = QtWidgets.QPushButton("Supprimer")
-        self.delete_button.setStyleSheet(delete_button_style)
-        self.delete_button.clicked.connect(self.music_manager.delete_selected_music)
-
-        self.restore_button = QtWidgets.QPushButton("Restaurer")
-        self.restore_button.setStyleSheet(button_style)
-        self.restore_button.clicked.connect(self.music_manager.restore_music)
-        self.restore_button.setEnabled(False)
-
         self.play_button = QtWidgets.QPushButton()
         self.play_button.setIcon(QtGui.QIcon(os.path.join(self.icon_folder, "play_icon.png")))
         self.play_button.setIconSize(QtCore.QSize(30, 30))
@@ -546,6 +569,15 @@ class MusicPlayer(QtWidgets.QMainWindow):
         self.backward_button.setIconSize(QtCore.QSize(30, 30))
         self.backward_button.setStyleSheet(control_button_style)
         self.backward_button.clicked.connect(self.music_manager.play_previous_music)
+
+        self.delete_button = QtWidgets.QPushButton("Supprimer")
+        self.delete_button.setStyleSheet(delete_button_style)
+        self.delete_button.clicked.connect(self.music_manager.delete_selected_music)
+
+        self.restore_button = QtWidgets.QPushButton("Restaurer")
+        self.restore_button.setStyleSheet(button_style)
+        self.restore_button.clicked.connect(self.music_manager.restore_music)
+        self.restore_button.setEnabled(False)
         
         # Bouton de répétition
         repeat_button_style = button_style.replace("#4CAF50", "#FF9800").replace("#45A049", "#FB8C00")
@@ -554,11 +586,6 @@ class MusicPlayer(QtWidgets.QMainWindow):
         self.repeat_button.setIcon(QtGui.QIcon(os.path.join(self.icon_folder, "repeat_icon.png")))
         self.repeat_button.setIconSize(QtCore.QSize(30, 30))
         self.repeat_button.clicked.connect(self.toggle_repeat)
-
-        # Menu Statistiques
-        stats_menu = QAction("Statistiques", self)
-        stats_menu.triggered.connect(self.show_stats_dialog)
-        menubar.addAction(stats_menu)
 
         # Layouts pour organiser les widgets
         search_sort_layout = QtWidgets.QHBoxLayout()
@@ -670,21 +697,6 @@ class MusicPlayer(QtWidgets.QMainWindow):
         self.settings['always_on_top'] = always_on_top
         save_settings(self.settings)  # Utiliser la fonction importée pour sauvegarder les paramètres
 
-    def change_spectrum_color(self):
-        """Ouvre un dialogue de couleur pour sélectionner la couleur du spectre."""
-        # Créer un sélecteur de couleur en tant que boîte de dialogue modale
-        color_dialog = QColorDialog(self)
-        color_dialog.setOption(QColorDialog.ColorDialogOption.ShowAlphaChannel, False)  # Masquer l'option d'opacité si non nécessaire
-        color_dialog.setWindowTitle("Choisissez la couleur du spectre")
-        color_dialog.setCurrentColor(QtGui.QColor(self.settings.get("spectrum_color", "#FF0000")))
-
-        if color_dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            # Si une couleur est sélectionnée, appliquer la couleur au spectre
-            color = color_dialog.selectedColor()
-            self.spectrum.set_spectrum_color(color)
-            self.settings['spectrum_color'] = color.name()
-            save_settings(self.settings)  # Utiliser la fonction importée pour sauvegarder les paramètres
-
     def apply_repeat_mode(self):
         """Applique immédiatement le mode de répétition sélectionné."""
         if self.repeat_mode == "track":
@@ -697,10 +709,6 @@ class MusicPlayer(QtWidgets.QMainWindow):
             self.repeat_button.setIcon(QtGui.QIcon(os.path.join(self.icon_folder, "repeat_icon.png")))
             print("Mode de répétition : Aucun.")
 
-        # Redémarrer les timers ou ajuster les comportements si nécessaire
-        if not self.playing:
-            print("La lecture n'est pas en cours. Les modifications seront appliquées lors de la prochaine lecture.")
-
     def load_folders(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Sélectionner des fichiers de musique", "", "Fichiers WAV (*.wav)")
         if files:
@@ -708,10 +716,10 @@ class MusicPlayer(QtWidgets.QMainWindow):
             self.executor.submit(self.add_files_async, files)
 
     def add_files_async(self, files):
-        """Ajoute les fichiers de musique sélectionnés à la liste en arrière-plan et les copie dans le dossier Stockage_Musique ( !!! NE PAS SUPPRIMER !!!), en évitant les doublons."""
+        """Ajoute les fichiers de musique sélectionnés à la liste en arrière-plan et les copie dans le dossier Stockage_Musique."""
         
         # Chemin du dossier de stockage
-        storage_path = os.path.join(os.path.expanduser("~"), "Music", "Stockage_Musique ( !!! NE PAS SUPPRIMER !!!)")
+        storage_path = os.path.join(os.path.expanduser("~"), "Music", "Stockage_Musique")
         
         # Vérifie si le dossier existe, sinon le crée
         if not os.path.exists(storage_path):
@@ -721,7 +729,7 @@ class MusicPlayer(QtWidgets.QMainWindow):
         existing_files = {music['display_name'] for music in self.music_data}
 
         for track in files:
-            # Créer le chemin de destination dans `Stockage_Musique ( !!! NE PAS SUPPRIMER !!!)`
+            # Créer le chemin de destination dans `Stockage_Musique`
             destination_path = os.path.join(storage_path, os.path.basename(track))
             display_name = os.path.basename(track).replace('.wav', '').lower()
 
@@ -730,7 +738,7 @@ class MusicPlayer(QtWidgets.QMainWindow):
                 print(f"Le fichier {display_name} est déjà présent. Il ne sera pas ajouté de nouveau.")
                 continue
 
-            # Copier le fichier dans le dossier `Stockage_Musique ( !!! NE PAS SUPPRIMER !!!)` s’il n'est pas déjà à cet emplacement
+            # Copier le fichier dans le dossier `Stockage_Musique` s’il n'est pas déjà à cet emplacement
             if track != destination_path:
                 shutil.copy(track, destination_path)
 
@@ -762,12 +770,10 @@ class MusicPlayer(QtWidgets.QMainWindow):
                 print(f"Erreur lors de l'ajout du fichier {destination_path}: {e}")
                 continue
 
-        # Appliquer le tri selon le mode de tri actuel
-        self.apply_current_sort()
-
-        # Mise à jour de l'interface
-        self.update_music_counter()
-        self.update_music_list_signal.emit()  # Mise à jour de la liste des musiques affichée
+        # Mise à jour de l'interface directement après l'ajout
+        self.apply_current_sort()  # Tri en fonction des préférences utilisateur
+        self.music_manager.update_music_list()  # Mise à jour de la liste des musiques affichée
+        self.music_manager.update_music_counter()  # Mise à jour du compteur de musiques
 
     def toggle_play_pause(self):
         """Bascule entre lecture et pause avec conservation de la position."""
@@ -784,7 +790,7 @@ class MusicPlayer(QtWidgets.QMainWindow):
                 # Redémarrer le SpectrumWorker uniquement si nécessaire
                 if not (self.spectrum.spectrum_worker_thread and self.spectrum.spectrum_worker_thread.isRunning()):
                     self.spectrum.restart_spectrum_worker()
-                
+
                 self.progress_timer.start()  # Redémarrer le timer de progression
                 print(f"Reprise à la position : {self.paused_position:.2f} secondes")
             else:
@@ -797,13 +803,14 @@ class MusicPlayer(QtWidgets.QMainWindow):
                 self.progress_timer.stop()  # Arrêter le timer de progression
                 print(f"Pause à la position : {self.paused_position:.2f} secondes")
         else:
+            # Appeler `play_music` via le gestionnaire de musique
             if 0 <= self.tracklist.currentRow() < len(self.filtered_music_data):
-                self.play_music()  # Lancer la lecture si rien ne joue actuellement
+                self.music_manager.play_music()  # Utilise la méthode du gestionnaire
             else:
                 if self.filtered_music_data:
                     self.current_track_index = random.randint(0, len(self.filtered_music_data) - 1)
                     self.tracklist.setCurrentRow(self.current_track_index)
-                    self.play_music()
+                    self.music_manager.play_music()  # Utilise la méthode du gestionnaire
                 else:
                     print("Aucune musique disponible pour la lecture.")
 
@@ -843,6 +850,9 @@ class MusicPlayer(QtWidgets.QMainWindow):
             }
             QTableWidget::item {
                 padding: 5px;
+            }
+            QTableWidget::item:hover {
+                background-color: transparent; /* Supprime l'effet de survol */
             }
         """)
 
@@ -994,8 +1004,6 @@ class MusicPlayer(QtWidgets.QMainWindow):
                 self.update_time_label(elapsed_time)  # Met à jour le label avec le temps écoulé
 
     def toggle_repeat(self):
-        print("toggle_repeat appelé")  # Vérifie si le bouton est cliqué
-
         # Alterner entre les modes de répétition
         if self.repeat_mode == "none":
             self.repeat_mode = "track"
@@ -1006,18 +1014,12 @@ class MusicPlayer(QtWidgets.QMainWindow):
         else:
             self.repeat_mode = "none"
             icon_path = os.path.join(self.icon_folder, "repeat_icon.png")
-
-        # Appliquer l'icône correspondante
         if os.path.exists(icon_path):
             self.repeat_button.setIcon(QtGui.QIcon(icon_path))
         else:
             print(f"Erreur : l'icône pour le mode '{self.repeat_mode}' est introuvable.")
-
-        # Sauvegarder le nouveau mode dans les paramètres
         self.settings['repeat_mode'] = self.repeat_mode
         save_settings(self.settings)  # Sauvegarde dans les paramètres
-
-        # Appliquer immédiatement les changements du mode de répétition
         self.apply_repeat_mode()
 
     def toggle_shuffle_mode(self):
