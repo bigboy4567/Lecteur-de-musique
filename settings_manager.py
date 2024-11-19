@@ -1,3 +1,7 @@
+# Ce projet est sous licence MIT.
+# Copyright (c) 2024 Nicolas Q.
+
+
 import json
 import os
 import wave
@@ -6,8 +10,14 @@ def load_settings():
     try:
         with open('settings.json', 'r') as file:
             settings = json.load(file)
-            # Vérifiez la taille du chunk, sinon utilisez la valeur par défaut
+            # Vérifiez et ajoutez des valeurs par défaut pour les paramètres manquants
             settings['chunk_size'] = settings.get('chunk_size', 16384)
+            settings['always_on_top'] = settings.get('always_on_top', False)
+            settings['sort_order'] = settings.get('sort_order', 'Nom')
+            settings['shuffle_mode'] = settings.get('shuffle_mode', False)
+            settings['repeat_mode'] = settings.get('repeat_mode', 'none')
+            settings['spectrum_color'] = settings.get('spectrum_color', '#FF0000')  # Couleur par défaut du spectre
+            settings['background_color'] = settings.get('background_color', '#2A2A3A')  # Couleur de fond par défaut
             return settings
     except (FileNotFoundError, json.JSONDecodeError):
         # Retourner les valeurs par défaut si le fichier est manquant ou corrompu
@@ -20,6 +30,12 @@ def load_settings():
             'spectrum_color': '#FF0000',
             'background_color': '#2A2A3A'
         }
+
+def save_spectrum_color(color):
+    """Sauvegarde la couleur du spectre dans les paramètres."""
+    settings = load_settings()
+    settings['spectrum_color'] = color.name()  # Sauvegarde la couleur en format hexadécimal
+    save_settings(settings)
 
 def save_settings(settings):
     """Sauvegarde les paramètres dans le fichier JSON."""
