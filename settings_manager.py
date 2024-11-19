@@ -1,7 +1,3 @@
-# Ce projet est sous licence MIT.
-# Copyright (c) 2024 Nicolas Q.
-
-
 import json
 import os
 import wave
@@ -9,43 +5,19 @@ import wave
 def load_settings():
     try:
         with open('settings.json', 'r') as file:
-            settings = json.load(file)
-            # Vérifiez et ajoutez des valeurs par défaut pour les paramètres manquants
-            settings['chunk_size'] = settings.get('chunk_size', 16384)
-            settings['always_on_top'] = settings.get('always_on_top', False)
-            settings['sort_order'] = settings.get('sort_order', 'Nom')
-            settings['shuffle_mode'] = settings.get('shuffle_mode', False)
-            settings['repeat_mode'] = settings.get('repeat_mode', 'none')
-            settings['spectrum_color'] = settings.get('spectrum_color', '#FF0000')  # Couleur par défaut du spectre
-            settings['background_color'] = settings.get('background_color', '#2A2A3A')  # Couleur de fond par défaut
-            return settings
+            return json.load(file)
     except (FileNotFoundError, json.JSONDecodeError):
-        # Retourner les valeurs par défaut si le fichier est manquant ou corrompu
         return {
-            'chunk_size': 16384,
             'always_on_top': False,
-            'sort_order': 'Nom',
+            'repeat_mode': "none",
             'shuffle_mode': False,
-            'repeat_mode': 'none',
-            'spectrum_color': '#FF0000',
-            'background_color': '#2A2A3A'
+            'spectrum_color': "#FF0000",
+            'background_color': "#2A2A3A"
         }
 
-def save_spectrum_color(color):
-    """Sauvegarde la couleur du spectre dans les paramètres."""
-    settings = load_settings()
-    settings['spectrum_color'] = color.name()  # Sauvegarde la couleur en format hexadécimal
-    save_settings(settings)
-
 def save_settings(settings):
-    """Sauvegarde les paramètres dans le fichier JSON."""
-    try:
-        # Sauvegarder le dictionnaire settings dans le fichier JSON
-        with open('settings.json', 'w') as file:
-            json.dump(settings, file, indent=4)
-        print("Paramètres sauvegardés avec succès.")
-    except Exception as e:
-        print(f"Erreur lors de la sauvegarde des paramètres : {e}")
+    with open('settings.json', 'w') as file:
+        json.dump(settings, file)
 
 def load_music_files_from_storage():
     """Charge les musiques depuis le dossier Stockage_Musique ( !!! NE PAS SUPPRIMER !!!) et récupère leurs informations."""
@@ -85,19 +57,12 @@ def load_music_files_from_storage():
 
 # Nouvelle fonction pour charger les statistiques d'écoute
 def load_stats():
-        """Charge les statistiques d'écoute depuis un fichier JSON."""
-        try:
-            with open('stats.json', 'r') as file:
-                stats = json.load(file)
-                # Uniformiser les clés pour compatibilité
-                for track in stats:
-                    if "play_count" in stats[track]:
-                        stats[track]["plays"] = stats[track].pop("play_count")
-                    if "total_time_played" in stats[track]:
-                        stats[track]["total_time"] = stats[track].pop("total_time_played")
-                return stats
-        except (FileNotFoundError, json.JSONDecodeError):
-            return {}
+    """Charge les statistiques d'écoute depuis un fichier JSON."""
+    try:
+        with open('stats.json', 'r') as file:
+            return json.load(file)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
 
 # Nouvelle fonction pour sauvegarder les statistiques d'écoute
 def save_stats(stats):
