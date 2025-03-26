@@ -131,6 +131,21 @@ class AudioSpectrum(QtWidgets.QWidget):
         self.spectrum_worker_thread = None
         self.spectrum_worker = None
 
+    def start_spectrum_worker(self):
+        """Démarre le SpectrumWorker si ce n'est pas déjà fait."""
+        if not self.spectrum_worker_thread or not self.spectrum_worker_thread.isRunning():
+            self.restart_spectrum_worker()
+
+    def stop_spectrum_worker(self):
+        """Arrête le SpectrumWorker s'il est en cours d'exécution."""
+        if self.spectrum_worker:
+            self.spectrum_worker.stop()
+        if self.spectrum_worker_thread:
+            self.spectrum_worker_thread.quit()
+            self.spectrum_worker_thread.wait()
+        self.spectrum_worker_thread = None
+        self.spectrum_worker = None
+
     def reset_spectrum_data(self):
         """Réinitialise les données du spectre à zéro."""
         self.spectrum_data = np.zeros(self.bars)
@@ -270,11 +285,10 @@ class AudioSpectrum(QtWidgets.QWidget):
         """Définit l'état de pause pour le spectre audio."""
         self.paused = paused
         if not paused:
-            self.restart_spectrum_worker()  # Reprend le calcul
+            self.start_spectrum_worker()  # Démarre le SpectrumWorker
         else:
-            # Arrête seulement les calculs, pas l'affichage
-            self.worker_running = False  # Arrêter le thread de calcul
-    
+            self.stop_spectrum_worker()   # Arrête le SpectrumWorker
+
     def resizeEvent(self, event):
         self._configure_bars()
         super().resizeEvent(event)
